@@ -1,5 +1,5 @@
 # Rules
-a set of different ansible rules that helped in my journey
+a set of different ansible rules and scripts that helped me in my journey
 
 ## Requirements
 
