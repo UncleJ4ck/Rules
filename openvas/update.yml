@@ -1,0 +1,34 @@
+---
+- name: Update Greenbone Community Containers
+  hosts: openvas_hosts
+  vars:
+    download_dir: "/opt/openvas"
+    project_name: "greenbone-community-edition"
+    compose_file: "{{ download_dir }}/docker-compose-22.4.yml"
+    feed_services:
+      - notus-data
+      - vulnerability-tests
+      - scap-data
+      - dfn-cert-data
+      - cert-bund-data
+      - report-formats
+      - data-objects
+  tasks:
+  - name: Download the Greenbone Community Containers
+    command:
+      cmd: "docker-compose -f {{ compose_file }} -p {{ project_name }} pull"
+      
+  - name: Start the Greenbone Community Containers
+    command:
+      cmd: "docker-compose -f {{ compose_file }} -p {{ project_name }} up -d"
+
+  - name: Download the Greenbone Community Edition feed data containers
+    command:
+      cmd: "docker-compose -f {{ compose_file }} -p {{ project_name }} pull {{ item }}"
+    loop: "{{ feed_services }}"
+    
+  - name: Start the Greenbone Community feed data containers
+    command:
+      cmd: "docker-compose -f {{ compose_file }} -p {{ project_name }} up -d {{ item }}"
+    loop: "{{ feed_services }}"
+...

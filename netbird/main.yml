@@ -1,0 +1,154 @@
+---
+- hosts: netbird_hosts
+  become: yes
+  vars_prompt:
+    - name: "NETBIRD_DOMAIN"
+      prompt: "Enter the NETBIRD_DOMAIN"
+    - name: "NETBIRD_AUTH_OIDC_CONFIGURATION_ENDPOINT"
+      prompt: "Enter the NETBIRD_AUTH_OIDC_CONFIGURATION_ENDPOINT"
+    - name: "NETBIRD_IDP_MGMT_CLIENT_SECRET"
+      prompt: "Enter the NETBIRD_IDP_MGMT_CLIENT_SECRET"
+    - name: "NETBIRD_IDP_MGMT_EXTRA_ADMIN_ENDPOINT"
+      prompt: "Enter the NETBIRD_IDP_MGMT_EXTRA_ADMIN_ENDPOINT"
+    - name: "NETBIRD_LETSENCRYPT_EMAIL"
+      prompt: "Enter the NETBIRD_LETSENCRYPT_EMAIL"
+  
+  tasks:
+    - name: Check if hostname is in /etc/hosts
+      shell: grep -q "{{ ansible_hostname }}" /etc/hosts
+      register: host_entry
+      failed_when: false
+
+    - name: Add hostname to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        backrefs: yes
+        regexp: '^(127\.0\.0\.1\s+localhost)(.*)$'
+        line: '\1 {{ ansible_hostname }}\2'
+      when: host_entry.rc != 0
+
+
+    - name: Update APT package manager repositories
+      apt:
+        update_cache: yes
+
+    - name: Install necessary packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - jq
+          - vim
+          - git
+          - gnupg-agent
+          - software-properties-common
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+
+    - name: Determine architecture
+      ansible.builtin.command:
+        cmd: dpkg --print-architecture
+      register: architecture
+
+    - name: Determine Debian version codename
+      command:
+        cmd: bash -c "source /etc/os-release && echo $VERSION_CODENAME"
+      register: debian_codename
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch={{ architecture.stdout }}] https://download.docker.com/linux/debian {{ debian_codename.stdout }} stable"
+        state: present
+
+    - name: Update APT package manager repositories
+      apt:
+        update_cache: yes
+
+    - name: Install Docker packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: latest
+
+    - name: Ensure Docker service is started and enabled
+      systemd:
+        name: docker
+        state: started 
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Determine OS and Machine Architecture
+      shell: echo "$(uname -s)-$(uname -m)"
+      register: os_arch
+
+    - name: Determine Docker Compose version
+      shell: curl --silent https://api.github.com/repos/docker/compose/releases/latest | jq .name -r
+      register: docker_compose_version
+
+    - name: Download Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version.stdout }}/docker-compose-{{ os_arch.stdout }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Make Docker Compose executable
+      file:
+        path: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Check if NetBird directory exists
+      stat:
+        path: /home/debian/netbird
+      register: netbird_dir
+
+    - name: Define the NetBird release
+      set_fact:
+        tag: "HEAD"
+
+    - name: Fetch and clone the NetBird code
+      block:
+        - name: Clone the repo tag
+          git:
+            repo: "https://github.com/netbirdio/netbird"
+            dest: "/home/debian/netbird"
+            version: "{{ tag }}"
+            force: yes
+          when: not netbird_dir.stat.exists
+
+
+    - name: Prepare configuration file
+      block:
+        - name: Create the setup.env file from a template
+          template:
+            src: setup.env.j2
+            dest: "/home/debian/netbird/infrastructure_files/setup.env"
+
+    - name: Set permissions for configure.sh
+      file:
+        path: /home/debian/netbird/infrastructure_files/configure.sh
+        mode: '0755'
+              
+    - name: Run configure.sh
+      command:
+        cmd: ./configure.sh
+        chdir: /home/debian/netbird/infrastructure_files/
+
+    - name: Run Docker Compose
+      docker_compose:
+        project_src: /home/debian/netbird/infrastructure_files/
+        state: present
+...

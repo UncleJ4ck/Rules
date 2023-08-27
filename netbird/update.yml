@@ -1,0 +1,14 @@
+---
+- hosts: netbird_hosts
+  become: yes
+  tasks:
+    - name: Pull the latest Docker images
+      command:
+        cmd: docker-compose pull
+        chdir: /home/debian/netbird/infrastructure_files/
+
+    - name: Update and recreate the specified services
+      command:
+        cmd: docker-compose up -d --force-recreate dashboard management signal
+        chdir: /home/debian/netbird/infrastructure_files/
+...

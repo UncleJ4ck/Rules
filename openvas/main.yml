@@ -1,0 +1,132 @@
+---
+- hosts: openvas_hosts
+  become: yes
+  vars:
+    release: "22.4"
+    openvas_dir_path: /opt/openvas
+  tasks:
+    - name: Check if hostname is in /etc/hosts
+      shell: grep -q "{{ ansible_hostname }}" /etc/hosts
+      register: host_entry
+      failed_when: false
+
+    - name: Add hostname to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        backrefs: yes
+        regexp: '^(127\.0\.0\.1\s+localhost)(.*)$'
+        line: '\1 {{ ansible_hostname }}\2'
+      when: host_entry.rc != 0
+
+    - name: Update APT package manager repositories
+      apt:
+        update_cache: yes
+
+    - name: Install necessary packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - jq
+          - vim
+          - git
+          - gnupg-agent
+          - software-properties-common
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+
+    - name: Determine architecture
+      ansible.builtin.command:
+        cmd: dpkg --print-architecture
+      register: architecture
+
+    - name: Determine Debian version codename
+      command:
+        cmd: bash -c "source /etc/os-release && echo $VERSION_CODENAME"
+      register: debian_codename
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch={{ architecture.stdout }}] https://download.docker.com/linux/debian {{ debian_codename.stdout }} stable"
+        state: present
+
+    - name: Update APT package manager repositories
+      apt:
+        update_cache: yes
+
+    - name: Install Docker packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: latest
+
+    - name: Ensure Docker service is started and enabled
+      systemd:
+        name: docker
+        state: started 
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Determine OS and Machine Architecture
+      shell: echo "$(uname -s)-$(uname -m)"
+      register: os_arch
+
+    - name: Determine Docker Compose version
+      shell: curl --silent https://api.github.com/repos/docker/compose/releases/latest | jq .name -r
+      register: docker_compose_version
+
+    - name: Download Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version.stdout }}/docker-compose-{{ os_arch.stdout }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Make Docker Compose executable
+      file:
+        path: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Ensure openvas directory exists
+      file:
+        path: "{{ openvas_dir_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download docker-compose file
+      get_url:
+        url: "https://greenbone.github.io/docs/latest/_static/docker-compose-{{ release }}.yml"
+        dest: "{{ openvas_dir_path }}/docker-compose-{{ release }}.yml"
+    
+    - name: Pull Greenbone Community Containers
+      command:
+        cmd: "docker-compose -f {{ openvas_dir_path }}/docker-compose-{{ release }}.yml -p greenbone-community-edition pull"
+      register: pull_result
+
+    - name: Start Greenbone Community Containers
+      command:
+        cmd: "docker-compose -f {{ openvas_dir_path }}/docker-compose-{{ release }}.yml -p greenbone-community-edition up -d"
+
+    - name: Prompt for admin user password
+      pause:
+        prompt: "Password for admin user:"
+        echo: no
+      register: password_prompt
+
+    - name: Update gvmd admin user password
+      command:
+        cmd: 'docker-compose -f {{ openvas_dir_path }}/docker-compose-{{ release }}.yml -p greenbone-community-edition exec -u gvmd gvmd gvmd --user=admin --new-password="{{ password_prompt.user_input }}"'
+...
