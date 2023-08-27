@@ -28,10 +28,6 @@ X.X.X.X
 ansible_user=<user>
 ```
 
-2. **Variables Prompt**: During playbook execution, you will be prompted to enter the password for admin user:
-
-![./img/scr.png](./img/scr.png)
-
 ## Usage
 
 Run the playbook using the following command:
