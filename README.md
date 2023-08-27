@@ -1,6 +1,6 @@
 # Rules
-a set of different ansible rules and scripts that helped me in my journey
-
+ A collection of diverse Ansible rules and scripts that helped me in my journey
+ 
 ## Requirements
 
 - Ansible 2.9 or higher
